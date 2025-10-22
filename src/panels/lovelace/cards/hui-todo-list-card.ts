@@ -8,7 +8,12 @@ import {
   mdiDrag,
   mdiPlus,
   mdiSort,
+  mdiFileExportOutline,
+  mdiCodeJson,
+  mdiFileDelimited,
+  mdiFilePdfBox,
 } from "@mdi/js";
+
 import { endOfDay, isSameDay } from "date-fns";
 import type { UnsubscribeFunc } from "home-assistant-js-websocket";
 import type { PropertyValueMap, PropertyValues } from "lit";
@@ -51,7 +56,7 @@ import type { HomeAssistant } from "../../../types";
 import { showTodoItemEditDialog } from "../../todo/show-dialog-todo-item-editor";
 import { findEntities } from "../common/find-entities";
 import { createEntityNotFoundWarning } from "../components/hui-warning";
-import type { LovelaceCard, LovelaceCardEditor } from "../types";
+import type { LovelaceCard, LovelaceCardEditor, ExportResp } from "../types";
 import type { TodoListCardConfig } from "./types";
 
 export const ITEM_TAP_ACTION_EDIT = "edit";
@@ -202,6 +207,72 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         : []
   );
 
+  private async _exportViaService(filetype: "json" | "csv" | "pdf") {
+    // NOTE: This calls the shopping_list service you showed in your example.
+    // If you intend to export the *todo* entity itself, you’ll need a matching
+    // backend service for the todo domain. Otherwise this exports the shopping_list
+
+    // try {
+    //   // Export the current todo entity's items
+    //   console.log(`Exporting todo list ${this._entityId} as ${filetype}`);
+    // } catch (err) {
+    //   console.error("Error exporting todo list:", err);
+    //   return;
+    // }
+
+    const res = await this.hass!.callApi<ExportResp>(
+      "POST",
+      "services/shopping_list/export?return_response=true",
+      { filetype: filetype }
+    );
+
+    const sr = res?.service_response;
+    if (!sr || !sr.content) return;
+
+    const { content, filename, mime_type, encoding } = sr;
+    let blob: Blob;
+
+    if (encoding && encoding.toLowerCase() === "base64") {
+      // PDF comes back base64
+      const byteStr = atob(content);
+      const bytes = new Uint8Array(byteStr.length);
+      for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i);
+      blob = new Blob([bytes], {
+        type: mime_type || "application/octet-stream",
+      });
+    } else {
+      // JSON/CSV likely come back as plain text
+      blob = new Blob([content], { type: mime_type || "text/plain" });
+    }
+
+    this._downloadBlob(filename || `export.${filetype}`, blob);
+  }
+
+  private _downloadBlob(filename: string, blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    (this.shadowRoot ?? document.body).appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  private _handleExportMenuAction(ev: CustomEvent<ActionDetail>) {
+    switch (ev.detail.index) {
+      case 0:
+        this._exportViaService("json");
+        break;
+      case 1:
+        this._exportViaService("csv");
+        break;
+      case 2:
+        this._exportViaService("pdf");
+        break;
+    }
+  }
+
   public willUpdate(
     changedProperties: PropertyValueMap<any> | Map<PropertyKey, unknown>
   ): void {
@@ -337,7 +408,10 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                         "ui.panel.lovelace.cards.todo-list.unchecked_items"
                       )}
                     </h2>
-                    ${this._renderMenu(this._config, unavailable)}
+                    <div style="display: flex; gap: 8px;">
+                      ${this._renderMenu(this._config, unavailable)}
+                      ${this._renderExport()}
+                    </div>
                   </div>
                   ${this._renderItems(uncheckedItems, unavailable)}
                 `
@@ -355,7 +429,10 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                         )}
                       </h2>
                       ${!uncheckedItems.length
-                        ? this._renderMenu(this._config, unavailable)
+                        ? html`<div style="display: flex; gap: 8px;">
+                            ${this._renderMenu(this._config, unavailable)}
+                            ${this._renderExport()}
+                          </div>`
                         : nothing}
                     </div>
                   </div>
@@ -437,6 +514,40 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
           </ha-list-item>
         </ha-button-menu>`
       : nothing;
+  }
+
+  private _renderExport() {
+    return html`<ha-button-menu
+      @closed=${stopPropagation}
+      fixed
+      @action=${this._handleExportMenuAction}
+    >
+      <ha-icon-button
+        slot="trigger"
+        .path=${mdiFileExportOutline}
+        .title=${this.hass!.localize(
+          "ui.panel.lovelace.cards.todo-list.export"
+        )}
+      ></ha-icon-button>
+
+      <!-- index 0 -->
+      <ha-list-item graphic="icon">
+        ${this.hass!.localize("ui.panel.lovelace.cards.todo-list.export_json")}
+        <ha-svg-icon slot="graphic" .path=${mdiCodeJson}></ha-svg-icon>
+      </ha-list-item>
+
+      <!-- index 1 -->
+      <ha-list-item graphic="icon">
+        ${this.hass!.localize("ui.panel.lovelace.cards.todo-list.export_csv")}
+        <ha-svg-icon slot="graphic" .path=${mdiFileDelimited}></ha-svg-icon>
+      </ha-list-item>
+
+      <!-- index 2 -->
+      <ha-list-item graphic="icon">
+        ${this.hass!.localize("ui.panel.lovelace.cards.todo-list.export_pdf")}
+        <ha-svg-icon slot="graphic" .path=${mdiFilePdfBox}></ha-svg-icon>
+      </ha-list-item>
+    </ha-button-menu>`;
   }
 
   private _getDueDate(item: TodoItem): Date | undefined {

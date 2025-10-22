@@ -6824,6 +6824,11 @@
             "reorder_items": "Reorder items",
             "exit_reorder_items": "Exit reorder mode",
             "drag_and_drop": "Drag and drop",
+            "export_list": "Export to-do list",
+            "export": "Export",
+            "export_json": "Export as JSON",
+            "export_csv": "Export as CSV",
+            "export_pdf": "Export as PDF",
             "delete_item": "Delete item",
             "delete_confirm_title": "Remove completed items?",
             "delete_confirm_text": "{number} {number, plural,\n  one {item}\n  other {items}\n} will be permanently removed from the to-do list."
