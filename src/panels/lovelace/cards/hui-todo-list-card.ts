@@ -56,7 +56,7 @@ import type { HomeAssistant } from "../../../types";
 import { showTodoItemEditDialog } from "../../todo/show-dialog-todo-item-editor";
 import { findEntities } from "../common/find-entities";
 import { createEntityNotFoundWarning } from "../components/hui-warning";
-import type { LovelaceCard, LovelaceCardEditor, ExportResp } from "../types";
+import type { LovelaceCard, LovelaceCardEditor } from "../types";
 import type { TodoListCardConfig } from "./types";
 
 export const ITEM_TAP_ACTION_EDIT = "edit";
@@ -208,41 +208,60 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   );
 
   private async _exportViaService(filetype: "json" | "csv" | "pdf") {
-    // NOTE: This calls the shopping_list service you showed in your example.
-    // If you intend to export the *todo* entity itself, you’ll need a matching
-    // backend service for the todo domain. Otherwise this exports the shopping_list
+    const entityId = this._entityId!;
+    // If the entity is a todo.* entity, call todo/export; otherwise fall back to shopping_list/export
+    const isTodo = entityId?.startsWith("todo.");
+    const route = isTodo ? "todo" : "shopping_list";
 
-    // try {
-    //   // Export the current todo entity's items
-    //   console.log(`Exporting todo list ${this._entityId} as ${filetype}`);
-    // } catch (err) {
-    //   console.error("Error exporting todo list:", err);
-    //   return;
-    // }
+    const body: any = { filetype };
+    if (isTodo) {
+      // entity service requires a target
+      body.entity_id = entityId;
+    }
 
-    const res = await this.hass!.callApi<ExportResp>(
+    const res = await this.hass!.callApi<any>(
       "POST",
-      "services/shopping_list/export?return_response=true",
-      { filetype: filetype }
+      `services/${route}/export?return_response=true`,
+      body
     );
 
-    const sr = res?.service_response;
-    if (!sr || !sr.content) return;
+    // Unwrap service_response: entity service returns a dict keyed by entity_id
+    let sr: any | undefined = res?.service_response;
+    if (!sr) return;
 
-    const { content, filename, mime_type, encoding } = sr;
+    if (!("content" in sr)) {
+      // entity-scoped: pick the response for our entityId, or fallback if only one key
+      sr =
+        sr[entityId] ??
+        (Object.keys(sr).length === 1 ? sr[Object.keys(sr)[0]] : undefined);
+    }
+    if (!sr || sr.content == null) return;
+
+    const { filename, mime_type, encoding } = sr;
+
     let blob: Blob;
-
-    if (encoding && encoding.toLowerCase() === "base64") {
-      // PDF comes back base64
-      const byteStr = atob(content);
+    if (encoding && String(encoding).toLowerCase() === "base64") {
+      // Binary (PDF)
+      const byteStr = atob(String(sr.content));
       const bytes = new Uint8Array(byteStr.length);
       for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i);
-      blob = new Blob([bytes], {
-        type: mime_type || "application/octet-stream",
-      });
+      blob = new Blob([bytes], { type: mime_type || "application/pdf" });
     } else {
-      // JSON/CSV likely come back as plain text
-      blob = new Blob([content], { type: mime_type || "text/plain" });
+      // Text (CSV/JSON). If content is an object/array, stringify it.
+      const isString = typeof sr.content === "string";
+      const text = isString
+        ? (sr.content as string)
+        : JSON.stringify(sr.content, null, 2);
+
+      const fallbackType =
+        mime_type ||
+        (filetype === "json"
+          ? "application/json"
+          : filetype === "csv"
+            ? "text/csv"
+            : "text/plain");
+
+      blob = new Blob([text], { type: fallbackType });
     }
 
     this._downloadBlob(filename || `export.${filetype}`, blob);
