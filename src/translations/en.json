@@ -6820,6 +6820,7 @@
             "no_status_items": "No status",
             "clear_items": "Remove completed items",
             "add_item": "Add item",
+            "search_items": "Search items",
             "today": "Today",
             "reorder_items": "Reorder items",
             "exit_reorder_items": "Exit reorder mode",
