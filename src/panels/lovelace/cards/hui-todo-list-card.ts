@@ -410,9 +410,8 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   }
 
   private _renderMenu(config: TodoListCardConfig, unavailable: boolean) {
-    return (!config.display_order ||
-      config.display_order === TodoSortMode.NONE) &&
-      this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
+    // Always show tripple-dot menu
+    return this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
       ? html`<ha-button-menu
           @closed=${stopPropagation}
           fixed
@@ -434,6 +433,30 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
               .disabled=${unavailable}
             >
             </ha-svg-icon>
+          </ha-list-item>
+
+          <ha-list-item graphic="icon">
+            Sort A → Z
+            <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+          </ha-list-item>
+          <ha-list-item graphic="icon">
+            Sort Z → A
+            <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+          </ha-list-item>
+
+          <ha-list-item graphic="icon">
+            Sort by date
+            <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+          </ha-list-item>
+
+          <ha-list-item graphic="icon">
+            Sort by category
+            <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+          </ha-list-item>
+
+          <ha-list-item graphic="icon">
+            Export list
+            <ha-svg-icon slot="graphic" .path=${mdiPlus}></ha-svg-icon>
           </ha-list-item>
         </ha-button-menu>`
       : nothing;
@@ -705,11 +728,25 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       case 0:
         this._toggleReorder();
         break;
+      case 1:
+        this._setSort(TodoSortMode.ALPHA_ASC);
+        break;
+      case 2:
+        this._setSort(TodoSortMode.ALPHA_DESC);
+        break;
+      case 3:
+        this._setSort(TodoSortMode.DUEDATE_ASC);
+        break;
     }
   }
 
   private _toggleReorder() {
     this._reordering = !this._reordering;
+  }
+
+  private _setSort(mode: TodoSortMode) {
+    this._config = { ...this._config!, display_order: mode };
+    this.requestUpdate();
   }
 
   private async _itemMoved(ev: CustomEvent) {
