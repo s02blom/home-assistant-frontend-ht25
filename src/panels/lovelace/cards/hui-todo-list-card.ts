@@ -294,8 +294,8 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         this._exportViaService("pdf");
         break;
     }
+  }
 
-    
   private _filterItemsBySearch(items: TodoItem[]): TodoItem[] {
     if (!this._searchQuery.trim()) {
       return items;
@@ -545,42 +545,69 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   }
 
   private _renderMenu(config: TodoListCardConfig, unavailable: boolean) {
-    if (
-      (!config.display_order || config.display_order === TodoSortMode.NONE) &&
-      this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
-    ) {
-      return html`
-        <ha-button-menu
-          @closed=${stopPropagation}
-          fixed
-          @action=${this._handlePrimaryMenuAction}
-        >
-          <ha-icon-button
-            slot="trigger"
-            .path=${mdiDotsVertical}
-          ></ha-icon-button>
-          <ha-list-item graphic="icon">
-            ${this.hass!.localize(
-              this._reordering
-                ? "ui.panel.lovelace.cards.todo-list.exit_reorder_items"
-                : "ui.panel.lovelace.cards.todo-list.reorder_items"
-            )}
-            <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
-          </ha-list-item>
+    // Always render the menu if MOVE_TODO_ITEM is supported.
+    return this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
+      ? html`
+          <ha-button-menu
+            @closed=${stopPropagation}
+            fixed
+            @action=${this._handlePrimaryMenuAction}
+          >
+            <ha-icon-button
+              slot="trigger"
+              .path=${mdiDotsVertical}
+            ></ha-icon-button>
 
-          <!-- 👇 New Menu Option -->
-          <ha-list-item graphic="icon">
-            Sort by category
-            <ha-svg-icon
-              slot="graphic"
-              .path=${mdiSortAlphabeticalAscending}
-              .disabled=${unavailable}
-            ></ha-svg-icon>
-          </ha-list-item>
-        </ha-button-menu>
-      `;
-    }
-    return nothing;
+            <!-- Reorder item: visually disabled while a sort is active -->
+            <ha-list-item graphic="icon">
+              ${this.hass!.localize(
+                this._reordering
+                  ? "ui.panel.lovelace.cards.todo-list.exit_reorder_items"
+                  : "ui.panel.lovelace.cards.todo-list.reorder_items"
+              )}
+              <ha-svg-icon
+                slot="graphic"
+                .path=${mdiSort}
+                .disabled=${unavailable}
+              ></ha-svg-icon>
+            </ha-list-item>
+
+            <ha-list-item
+              graphic="icon"
+              ?activated=${config.display_order === TodoSortMode.ALPHA_ASC}
+            >
+              Sort A → Z
+              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+            </ha-list-item>
+
+            <ha-list-item
+              graphic="icon"
+              ?activated=${config.display_order === TodoSortMode.ALPHA_DESC}
+            >
+              Sort Z → A
+              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+            </ha-list-item>
+
+            <ha-list-item
+              graphic="icon"
+              ?activated=${config.display_order === TodoSortMode.DUEDATE_ASC}
+            >
+              Sort by date
+              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+            </ha-list-item>
+
+            <!-- Sort by category option -->
+            <ha-list-item graphic="icon">
+              Sort by category
+              <ha-svg-icon
+                slot="graphic"
+                .path=${mdiSortAlphabeticalAscending}
+                .disabled=${unavailable}
+              ></ha-svg-icon>
+            </ha-list-item>
+          </ha-button-menu>
+        `
+      : nothing;
   }
 
   private _renderExport() {
@@ -846,6 +873,10 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     });
   }
 
+  private _handleSearchInput(ev): void {
+    this._searchQuery = ev.target.value;
+  }
+
   private get _newItem(): HaTextField {
     return this.shadowRoot!.querySelector(".addBox") as HaTextField;
   }
@@ -878,16 +909,32 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     }
   }
 
-  private _handleSearchInput(ev): void {
-    this._searchQuery = ev.target.value;
-  }
-
-  private _handlePrimaryMenuAction(ev: CustomEvent<ActionDetail>) {
+  private async _handlePrimaryMenuAction(ev: CustomEvent<ActionDetail>) {
     switch (ev.detail.index) {
       case 0:
+        // Reorder: if a sort is active, clear it first, then toggle reorder.
+        if (
+          this._config &&
+          this._config.display_order &&
+          this._config.display_order !== TodoSortMode.NONE
+        ) {
+          this._setSort(TodoSortMode.NONE);
+          // wait a tick for re-render to settle so order UI updates correctly
+          await this.updateComplete;
+        }
         this._toggleReorder();
         break;
       case 1:
+        this._setSort(TodoSortMode.ALPHA_ASC);
+        break;
+      case 2:
+        this._setSort(TodoSortMode.ALPHA_DESC);
+        break;
+      case 3:
+        // One-way date sort
+        this._setSort(TodoSortMode.DUEDATE_ASC);
+        break;
+      case 4:
         this._sortByCategory();
         break;
     }
@@ -895,6 +942,12 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
 
   private _toggleReorder() {
     this._reordering = !this._reordering;
+  }
+
+  private _setSort(mode: TodoSortMode) {
+    const oldConfig = this._config;
+    this._config = { ...this._config!, display_order: mode };
+    this.requestUpdate("_config", oldConfig);
   }
 
   private async _sortByCategory() {
