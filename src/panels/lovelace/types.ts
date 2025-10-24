@@ -225,3 +225,13 @@ export interface LovelaceHeadingBadgeEditor
   extends LovelaceGenericElementEditor {
   setConfig(config: LovelaceHeadingBadgeConfig): void;
 }
+
+export interface ExportResp {
+  changed_states?: any[];
+  service_response?: {
+    content: string;
+    filename: string;
+    mime_type?: string;
+    encoding?: "base64" | "utf-8" | string;
+  };
+}
