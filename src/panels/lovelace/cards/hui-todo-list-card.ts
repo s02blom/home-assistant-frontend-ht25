@@ -212,63 +212,91 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   );
 
   private async _exportViaService(filetype: "json" | "csv" | "pdf") {
-    const entityId = this._entityId!;
-    // If the entity is a todo.* entity, call todo/export; otherwise fall back to shopping_list/export
-    const isTodo = entityId?.startsWith("todo.");
-    const route = isTodo ? "todo" : "shopping_list";
+    if (!this._items) return;
 
-    const body: any = { filetype };
-    if (isTodo) {
-      // entity service requires a target
-      body.entity_id = entityId;
+    // Get filtered items as displayed in the UI (already sorted on backend)
+    const filteredItems = this._filterItemsBySearch(this._items);
+
+    if (filetype === "json") {
+      // Export as JSON
+      const content = JSON.stringify(filteredItems, null, 2);
+      const blob = new Blob([content], { type: "application/json" });
+      this._downloadBlob("todo-list.json", blob);
+    } else if (filetype === "csv") {
+      // Export as CSV
+      const content = this._convertToCSV(filteredItems);
+      const blob = new Blob([content], { type: "text/csv" });
+      this._downloadBlob("todo-list.csv", blob);
+    } else if (filetype === "pdf") {
+      // For PDF, use backend service as it requires complex formatting
+      const entityId = this._entityId!;
+      const isTodo = entityId?.startsWith("todo.");
+      const route = isTodo ? "todo" : "shopping_list";
+
+      const body: any = { filetype };
+      if (isTodo) {
+        body.entity_id = entityId;
+      }
+
+      try {
+        const res = await this.hass!.callApi<any>(
+          "POST",
+          `services/${route}/export?return_response=true`,
+          body
+        );
+
+        let sr: any | undefined = res?.service_response;
+        if (!sr) return;
+
+        if (!("content" in sr)) {
+          sr =
+            sr[entityId] ??
+            (Object.keys(sr).length === 1 ? sr[Object.keys(sr)[0]] : undefined);
+        }
+        if (!sr || sr.content == null) return;
+
+        const { filename, mime_type, encoding } = sr;
+
+        if (encoding && String(encoding).toLowerCase() === "base64") {
+          const byteStr = atob(String(sr.content));
+          const bytes = new Uint8Array(byteStr.length);
+          for (let i = 0; i < byteStr.length; i++)
+            bytes[i] = byteStr.charCodeAt(i);
+          const blob = new Blob([bytes], {
+            type: mime_type || "application/pdf",
+          });
+          this._downloadBlob(filename || "todo-list.pdf", blob);
+        }
+      } catch (err: any) {
+        alert(`Failed to export PDF: ${err?.message || err}`);
+      }
     }
+  }
 
-    const res = await this.hass!.callApi<any>(
-      "POST",
-      `services/${route}/export?return_response=true`,
-      body
-    );
+  private _convertToCSV(items: TodoItem[]): string {
+    // CSV header
+    const headers = ["Summary", "Status", "Description", "Due Date"];
+    const rows = [headers.join(",")];
 
-    // Unwrap service_response: entity service returns a dict keyed by entity_id
-    let sr: any | undefined = res?.service_response;
-    if (!sr) return;
+    // CSV rows
+    items.forEach((item) => {
+      const summary = this._escapeCSV(item.summary);
+      const status = item.status || "no status";
+      const description = this._escapeCSV(item.description || "");
+      const dueDate = item.due || "";
+      rows.push([summary, status, description, dueDate].join(","));
+    });
 
-    if (!("content" in sr)) {
-      // entity-scoped: pick the response for our entityId, or fallback if only one key
-      sr =
-        sr[entityId] ??
-        (Object.keys(sr).length === 1 ? sr[Object.keys(sr)[0]] : undefined);
+    return rows.join("\n");
+  }
+
+  private _escapeCSV(value: string): string {
+    if (!value) return "";
+    // Escape quotes and wrap in quotes if contains comma, quote, or newline
+    if (value.includes(",") || value.includes('"') || value.includes("\n")) {
+      return `"${value.replace(/"/g, '""')}"`;
     }
-    if (!sr || sr.content == null) return;
-
-    const { filename, mime_type, encoding } = sr;
-
-    let blob: Blob;
-    if (encoding && String(encoding).toLowerCase() === "base64") {
-      // Binary (PDF)
-      const byteStr = atob(String(sr.content));
-      const bytes = new Uint8Array(byteStr.length);
-      for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i);
-      blob = new Blob([bytes], { type: mime_type || "application/pdf" });
-    } else {
-      // Text (CSV/JSON). If content is an object/array, stringify it.
-      const isString = typeof sr.content === "string";
-      const text = isString
-        ? (sr.content as string)
-        : JSON.stringify(sr.content, null, 2);
-
-      const fallbackType =
-        mime_type ||
-        (filetype === "json"
-          ? "application/json"
-          : filetype === "csv"
-            ? "text/csv"
-            : "text/plain");
-
-      blob = new Blob([text], { type: fallbackType });
-    }
-
-    this._downloadBlob(filename || `export.${filetype}`, blob);
+    return value;
   }
 
   private _downloadBlob(filename: string, blob: Blob) {
@@ -362,25 +390,17 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       ? this._filterItemsBySearch(this._items)
       : undefined;
 
-    const checkedItems = this._getCheckedItems(
-      filteredItems,
-      this._config.display_order
-    );
-    const uncheckedItems = this._getUncheckedItems(
-      filteredItems,
-      this._config.display_order
-    );
+    // Items are now sorted on the backend, so we don't apply display_order
+    const checkedItems = this._getCheckedItems(filteredItems, undefined);
+    const uncheckedItems = this._getUncheckedItems(filteredItems, undefined);
 
     const itemsWithoutStatus = this._getItemsWithoutStatus(
       filteredItems,
-      this._config.display_order
+      undefined
     );
 
     const reorderableItems = this._reordering
-      ? this._getUncheckedAndItemsWithoutStatus(
-          filteredItems,
-          this._config.display_order
-        )
+      ? this._getUncheckedAndItemsWithoutStatus(filteredItems, undefined)
       : undefined;
 
     return html`
@@ -544,7 +564,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     `;
   }
 
-  private _renderMenu(config: TodoListCardConfig, unavailable: boolean) {
+  private _renderMenu(_config: TodoListCardConfig, unavailable: boolean) {
     // Always render the menu if MOVE_TODO_ITEM is supported.
     return this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
       ? html`
@@ -572,26 +592,17 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
               ></ha-svg-icon>
             </ha-list-item>
 
-            <ha-list-item
-              graphic="icon"
-              ?activated=${config.display_order === TodoSortMode.ALPHA_ASC}
-            >
+            <ha-list-item graphic="icon">
               Sort A → Z
               <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
             </ha-list-item>
 
-            <ha-list-item
-              graphic="icon"
-              ?activated=${config.display_order === TodoSortMode.ALPHA_DESC}
-            >
+            <ha-list-item graphic="icon">
               Sort Z → A
               <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
             </ha-list-item>
 
-            <ha-list-item
-              graphic="icon"
-              ?activated=${config.display_order === TodoSortMode.DUEDATE_ASC}
-            >
+            <ha-list-item graphic="icon">
               Sort by date
               <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
             </ha-list-item>
@@ -912,16 +923,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   private async _handlePrimaryMenuAction(ev: CustomEvent<ActionDetail>) {
     switch (ev.detail.index) {
       case 0:
-        // Reorder: if a sort is active, clear it first, then toggle reorder.
-        if (
-          this._config &&
-          this._config.display_order &&
-          this._config.display_order !== TodoSortMode.NONE
-        ) {
-          this._setSort(TodoSortMode.NONE);
-          // wait a tick for re-render to settle so order UI updates correctly
-          await this.updateComplete;
-        }
+        // Toggle reorder mode
         this._toggleReorder();
         break;
       case 1:
@@ -944,10 +946,28 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     this._reordering = !this._reordering;
   }
 
-  private _setSort(mode: TodoSortMode) {
-    const oldConfig = this._config;
-    this._config = { ...this._config!, display_order: mode };
-    this.requestUpdate("_config", oldConfig);
+  private async _setSort(mode: TodoSortMode) {
+    if (!this._items || !this.hass || !this._entityId) return;
+
+    // Sort items according to the selected mode
+    const sortedItems = this._sortItems([...this._items], mode);
+
+    // Reorder items on the backend by calling moveItem for each item
+    // We move items in reverse order to maintain correct positioning
+
+    for (let i = sortedItems.length - 1; i >= 0; i--) {
+      const item = sortedItems[i];
+      const previousItem = i > 0 ? sortedItems[i - 1] : undefined;
+
+      try {
+        // Sequential execution is required to maintain correct order
+        // eslint-disable-next-line no-await-in-loop
+        await moveItem(this.hass, this._entityId, item.uid, previousItem?.uid);
+      } catch (err: any) {
+        alert(`Failed to reorder items: ${err?.message || err}`);
+        return;
+      }
+    }
   }
 
   private async _sortByCategory() {
@@ -961,7 +981,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       window.alert(`Failed to sort by category: ${err?.message || err}`);
     }
   }
-
 
   private async _itemMoved(ev: CustomEvent) {
     ev.stopPropagation();
