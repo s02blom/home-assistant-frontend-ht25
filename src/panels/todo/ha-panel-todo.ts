@@ -24,6 +24,7 @@ import {
 } from "../../common/url/search-params";
 import "../../components/ha-button";
 import "../../components/ha-fab";
+import "@material/web/chips/assist-chip";
 import "../../components/ha-icon-button";
 import "../../components/ha-list";
 import "../../components/ha-list-item";
@@ -49,6 +50,8 @@ import { showTodoItemEditDialog } from "./show-dialog-todo-item-editor";
 
 @customElement("ha-panel-todo")
 class PanelTodo extends LitElement {
+  @state() private _suggestions: string[] = [];
+
   @property({ attribute: false }) public hass!: HomeAssistant;
 
   @property({ type: Boolean, reflect: true }) public narrow = false;
@@ -97,6 +100,27 @@ class PanelTodo extends LitElement {
     this.mobile = ev.matches;
   };
 
+  private async _fetchRecommendations(item: string) {
+    try {
+      console.log("Fetching recommendations for:", item);
+
+      const result = await this.hass.callWS<{ suggestions: string[] }>({
+        type: "shopping_list/recommendations",
+        item,
+      });
+
+      console.log("WS result:", result);
+
+      // Spread the array to trigger re-render properly
+      this._suggestions = [...(result.suggestions || [])];
+
+      console.log("Updated suggestions:", this._suggestions);
+    } catch (err) {
+      console.error("Failed to fetch recommendations:", err);
+      this._suggestions = [];
+    }
+  }
+
   protected willUpdate(changedProperties: PropertyValues): void {
     super.willUpdate(changedProperties);
 
@@ -118,6 +142,13 @@ class PanelTodo extends LitElement {
 
     if (changedProperties.has("_entityId") || !this.hasUpdated) {
       this._setupTodoElement();
+
+      this.hass.connection.subscribeEvents((ev: any) => {
+        const item = ev.data?.item?.name;
+        if (item && this._entityId === "todo.shopping_list") {
+          this._fetchRecommendations(item);
+        }
+      }, "shopping_list_updated");
     }
   }
 
@@ -281,12 +312,39 @@ class PanelTodo extends LitElement {
               <ha-svg-icon slot="icon" .path=${mdiPlus}></ha-svg-icon>
             </ha-fab>`
           : nothing}
+        ${this._entityId === "todo.shopping_list" && this._suggestions.length
+          ? html`
+              <div class="suggestions">
+                <h3>Suggestions</h3>
+                ${this._suggestions.map(
+                  (sug) => html`
+                    <md-assist-chip
+                      data-suggestion=${sug}
+                      label=${sug}
+                      @click=${this._handleSuggestionClick}
+                    >
+                    </md-assist-chip>
+                  `
+                )}
+              </div>
+            `
+          : ""}
       </ha-two-pane-top-app-bar-fixed>
     `;
   }
 
   private _handleEntityPicked(ev) {
     this._entityId = ev.currentTarget.entityId;
+  }
+
+  private _handleSuggestionClick(ev: Event) {
+    console.log("Chip clicked!", ev);
+    const chip = ev.currentTarget as HTMLElement;
+    const suggestion = chip.dataset.suggestion;
+    console.log("Chip suggestion:", suggestion);
+    if (!suggestion) return;
+
+    this._addItemFromSuggestion(suggestion);
   }
 
   private async _addList(): Promise<void> {
@@ -359,6 +417,14 @@ class PanelTodo extends LitElement {
     showTodoItemEditDialog(this, { entity: this._entityId! });
   }
 
+  private _addItemFromSuggestion(suggestion: string) {
+    this.hass.callService("todo", "add_item", {
+      entity_id: "todo.shopping_list",
+      item: suggestion,
+    });
+    this._fetchRecommendations(suggestion);
+  }
+
   static get styles(): CSSResultGroup {
     return [
       haStyle,
@@ -407,6 +473,31 @@ class PanelTodo extends LitElement {
           bottom: 16px;
           inset-inline-end: 16px;
           inset-inline-start: initial;
+        }
+        .suggestions {
+          margin: 16px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: center;
+        }
+
+        .suggestions h3 {
+          width: 100%;
+          font-size: 14px;
+          font-weight: 500;
+          color: var(--secondary-text-color);
+          margin: 0 0 4px 0;
+        }
+
+        md-assist-chip {
+          cursor: pointer;
+          --md-assist-chip-container-color: var(--ha-card-background);
+          --md-assist-chip-label-text-color: var(--primary-text-color);
+        }
+
+        md-assist-chip:hover {
+          background-color: var(--secondary-background-color);
         }
       `,
     ];
