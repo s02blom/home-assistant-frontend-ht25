@@ -9,6 +9,7 @@ import {
   mdiMagnify,
   mdiPlus,
   mdiSort,
+  mdiSortAlphabeticalAscending,
 } from "@mdi/js";
 import { endOfDay, isSameDay } from "date-fns";
 import type { UnsubscribeFunc } from "home-assistant-js-websocket";
@@ -448,10 +449,12 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   }
 
   private _renderMenu(config: TodoListCardConfig, unavailable: boolean) {
-    return (!config.display_order ||
-      config.display_order === TodoSortMode.NONE) &&
+    if (
+      (!config.display_order || config.display_order === TodoSortMode.NONE) &&
       this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
-      ? html`<ha-button-menu
+    ) {
+      return html`
+        <ha-button-menu
           @closed=${stopPropagation}
           fixed
           @action=${this._handlePrimaryMenuAction}
@@ -466,15 +469,22 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                 ? "ui.panel.lovelace.cards.todo-list.exit_reorder_items"
                 : "ui.panel.lovelace.cards.todo-list.reorder_items"
             )}
+            <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+          </ha-list-item>
+
+          <!-- 👇 New Menu Option -->
+          <ha-list-item graphic="icon">
+            Sort by category
             <ha-svg-icon
               slot="graphic"
-              .path=${mdiSort}
+              .path=${mdiSortAlphabeticalAscending}
               .disabled=${unavailable}
-            >
-            </ha-svg-icon>
+            ></ha-svg-icon>
           </ha-list-item>
-        </ha-button-menu>`
-      : nothing;
+        </ha-button-menu>
+      `;
+    }
+    return nothing;
   }
 
   private _getDueDate(item: TodoItem): Date | undefined {
@@ -747,12 +757,28 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       case 0:
         this._toggleReorder();
         break;
+      case 1:
+        this._sortByCategory();
+        break;
     }
   }
 
   private _toggleReorder() {
     this._reordering = !this._reordering;
   }
+
+  private async _sortByCategory() {
+    if (!this.hass || !this._entityId) return;
+
+    try {
+      await this.hass.callService("shopping_list", "sort", {
+        by: "description",
+      });
+    } catch (err: any) {
+      window.alert(`Failed to sort by category: ${err?.message || err}`);
+    }
+  }
+
 
   private async _itemMoved(ev: CustomEvent) {
     ev.stopPropagation();
