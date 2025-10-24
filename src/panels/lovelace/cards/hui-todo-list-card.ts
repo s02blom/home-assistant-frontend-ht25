@@ -6,6 +6,7 @@ import {
   mdiDeleteSweep,
   mdiDotsVertical,
   mdiDrag,
+  mdiMagnify,
   mdiPlus,
   mdiSort,
   mdiFileExportOutline,
@@ -261,8 +262,8 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         (filetype === "json"
           ? "application/json"
           : filetype === "csv"
-          ? "text/csv"
-          : "text/plain");
+            ? "text/csv"
+            : "text/plain");
 
       blob = new Blob([text], { type: fallbackType });
     }
@@ -357,23 +358,27 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
 
     const unavailable = isUnavailableState(stateObj.state);
 
+    const filteredItems = this._items
+      ? this._filterItemsBySearch(this._items)
+      : undefined;
+
     const checkedItems = this._getCheckedItems(
-      this._items,
+      filteredItems,
       this._config.display_order
     );
     const uncheckedItems = this._getUncheckedItems(
-      this._items,
+      filteredItems,
       this._config.display_order
     );
 
     const itemsWithoutStatus = this._getItemsWithoutStatus(
-      this._items,
+      filteredItems,
       this._config.display_order
     );
 
     const reorderableItems = this._reordering
       ? this._getUncheckedAndItemsWithoutStatus(
-          this._items,
+          filteredItems,
           this._config.display_order
         )
       : undefined;
@@ -407,6 +412,25 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                   @click=${this._addItem}
                 >
                 </ha-icon-button>
+              </div>
+            `
+          : nothing}
+        ${this._items && this._items.length > 0
+          ? html`
+              <div class="searchRow">
+                <ha-svg-icon
+                  class="searchIcon"
+                  .path=${mdiMagnify}
+                ></ha-svg-icon>
+                <ha-textfield
+                  class="searchBox"
+                  .placeholder=${this.hass!.localize(
+                    "ui.panel.lovelace.cards.todo-list.search_items"
+                  )}
+                  .value=${this._searchQuery}
+                  @input=${this._handleSearchInput}
+                  .disabled=${unavailable}
+                ></ha-textfield>
               </div>
             `
           : nothing}
@@ -521,6 +545,7 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   }
 
   private _renderMenu(config: TodoListCardConfig, unavailable: boolean) {
+    // Always render the menu if MOVE_TODO_ITEM is supported.
     return this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
       ? html`
           <ha-button-menu
@@ -563,6 +588,15 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
               <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
             </ha-list-item>
 
+            <ha-list-item
+              graphic="icon"
+              ?activated=${config.display_order === TodoSortMode.DUEDATE_ASC}
+            >
+              Sort by date
+              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+            </ha-list-item>
+
+            <!-- Sort by category option -->
             <ha-list-item graphic="icon">
               Sort by category
               <ha-svg-icon
@@ -570,14 +604,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                 .path=${mdiSortAlphabeticalAscending}
                 .disabled=${unavailable}
               ></ha-svg-icon>
-            </ha-list-item>
-
-            <ha-list-item
-              graphic="icon"
-              ?activated=${config.display_order === TodoSortMode.DUEDATE_ASC}
-            >
-              Sort by date
-              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
             </ha-list-item>
           </ha-button-menu>
         `
@@ -847,6 +873,10 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     });
   }
 
+  private _handleSearchInput(ev): void {
+    this._searchQuery = ev.target.value;
+  }
+
   private get _newItem(): HaTextField {
     return this.shadowRoot!.querySelector(".addBox") as HaTextField;
   }
@@ -901,12 +931,12 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         this._setSort(TodoSortMode.ALPHA_DESC);
         break;
       case 3:
-        // Sort by category (kept as original dev behavior: call service)
-        this._sortByCategory();
-        break;
-      case 4:
         // One-way date sort
         this._setSort(TodoSortMode.DUEDATE_ASC);
+        break;
+      case 4:
+        // Sort by category (kept as original dev behavior: call service)
+        this._sortByCategory();
         break;
     }
   }
@@ -921,16 +951,19 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     this.requestUpdate("_config", oldConfig);
   }
 
-  private async _sortByCategory() {
-    if (!this.hass || !this._entityId) return;
+  private _sortByCategory() {
+    if (!this._items) return;
 
-    try {
-      await this.hass.callService("shopping_list", "sort", {
-        by: "description",
-      });
-    } catch (err: any) {
-      window.alert(`Failed to sort by category: ${err?.message || err}`);
-    }
+    // Sort items by description field (case-insensitive)
+    const sortedItems = [...this._items].sort((a, b) =>
+      caseInsensitiveStringCompare(
+        a.description || "",
+        b.description || "",
+        this.hass?.locale.language
+      )
+    );
+
+    this._items = sortedItems;
   }
 
   private async _itemMoved(ev: CustomEvent) {
@@ -1010,6 +1043,24 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       right: 16px;
       inset-inline-start: initial;
       inset-inline-end: 16px;
+    }
+
+    .searchRow {
+      padding: 8px 16px;
+      padding-bottom: 8px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .searchIcon {
+      color: var(--secondary-text-color);
+      --mdc-icon-size: 20px;
+    }
+
+    .searchBox {
+      flex-grow: 1;
     }
 
     .addRow,
