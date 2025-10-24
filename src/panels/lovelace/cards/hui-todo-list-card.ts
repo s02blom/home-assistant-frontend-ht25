@@ -98,7 +98,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
 
   @state() private _reordering = false;
 
-  // search query (added to support filter helper included from dev branch)
   @state() private _searchQuery = "";
 
   private _unsubItems?: Promise<UnsubscribeFunc>;
