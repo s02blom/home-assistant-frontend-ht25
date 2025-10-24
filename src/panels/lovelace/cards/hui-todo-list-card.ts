@@ -588,15 +588,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
               <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
             </ha-list-item>
 
-            <ha-list-item graphic="icon">
-              Sort by category
-              <ha-svg-icon
-                slot="graphic"
-                .path=${mdiSortAlphabeticalAscending}
-                .disabled=${unavailable}
-              ></ha-svg-icon>
-            </ha-list-item>
-
             <ha-list-item
               graphic="icon"
               ?activated=${config.display_order === TodoSortMode.DUEDATE_ASC}
@@ -940,12 +931,12 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         this._setSort(TodoSortMode.ALPHA_DESC);
         break;
       case 3:
-        // Sort by category (kept as original dev behavior: call service)
-        this._sortByCategory();
-        break;
-      case 4:
         // One-way date sort
         this._setSort(TodoSortMode.DUEDATE_ASC);
+        break;
+      case 4:
+        // Sort by category (kept as original dev behavior: call service)
+        this._sortByCategory();
         break;
     }
   }
@@ -960,16 +951,19 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     this.requestUpdate("_config", oldConfig);
   }
 
-  private async _sortByCategory() {
-    if (!this.hass || !this._entityId) return;
+  private _sortByCategory() {
+    if (!this._items) return;
 
-    try {
-      await this.hass.callService("shopping_list", "sort", {
-        by: "description",
-      });
-    } catch (err: any) {
-      window.alert(`Failed to sort by category: ${err?.message || err}`);
-    }
+    // Sort items by description field (case-insensitive)
+    const sortedItems = [...this._items].sort((a, b) =>
+      caseInsensitiveStringCompare(
+        a.description || "",
+        b.description || "",
+        this.hass?.locale.language
+      )
+    );
+
+    this._items = sortedItems;
   }
 
   private async _itemMoved(ev: CustomEvent) {
