@@ -6,6 +6,7 @@ import {
   mdiDeleteSweep,
   mdiDotsVertical,
   mdiDrag,
+  mdiMagnify,
   mdiPlus,
   mdiSort,
   mdiFileExportOutline,
@@ -96,6 +97,8 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   @state() private _items?: TodoItem[];
 
   @state() private _reordering = false;
+
+  @state() private _searchQuery = "";
 
   private _unsubItems?: Promise<UnsubscribeFunc>;
 
@@ -290,6 +293,18 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         this._exportViaService("pdf");
         break;
     }
+
+    
+  private _filterItemsBySearch(items: TodoItem[]): TodoItem[] {
+    if (!this._searchQuery.trim()) {
+      return items;
+    }
+    const query = this._searchQuery.toLowerCase();
+    return items.filter(
+      (item) =>
+        item.summary.toLowerCase().includes(query) ||
+        (item.description && item.description.toLowerCase().includes(query))
+    );
   }
 
   public willUpdate(
@@ -342,23 +357,27 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
 
     const unavailable = isUnavailableState(stateObj.state);
 
+    const filteredItems = this._items
+      ? this._filterItemsBySearch(this._items)
+      : undefined;
+
     const checkedItems = this._getCheckedItems(
-      this._items,
+      filteredItems,
       this._config.display_order
     );
     const uncheckedItems = this._getUncheckedItems(
-      this._items,
+      filteredItems,
       this._config.display_order
     );
 
     const itemsWithoutStatus = this._getItemsWithoutStatus(
-      this._items,
+      filteredItems,
       this._config.display_order
     );
 
     const reorderableItems = this._reordering
       ? this._getUncheckedAndItemsWithoutStatus(
-          this._items,
+          filteredItems,
           this._config.display_order
         )
       : undefined;
@@ -392,6 +411,25 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                   @click=${this._addItem}
                 >
                 </ha-icon-button>
+              </div>
+            `
+          : nothing}
+        ${this._items && this._items.length > 0
+          ? html`
+              <div class="searchRow">
+                <ha-svg-icon
+                  class="searchIcon"
+                  .path=${mdiMagnify}
+                ></ha-svg-icon>
+                <ha-textfield
+                  class="searchBox"
+                  .placeholder=${this.hass!.localize(
+                    "ui.panel.lovelace.cards.todo-list.search_items"
+                  )}
+                  .value=${this._searchQuery}
+                  @input=${this._handleSearchInput}
+                  .disabled=${unavailable}
+                ></ha-textfield>
               </div>
             `
           : nothing}
@@ -830,6 +868,10 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     }
   }
 
+  private _handleSearchInput(ev): void {
+    this._searchQuery = ev.target.value;
+  }
+
   private _handlePrimaryMenuAction(ev: CustomEvent<ActionDetail>) {
     switch (ev.detail.index) {
       case 0:
@@ -919,6 +961,24 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       right: 16px;
       inset-inline-start: initial;
       inset-inline-end: 16px;
+    }
+
+    .searchRow {
+      padding: 8px 16px;
+      padding-bottom: 8px;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .searchIcon {
+      color: var(--secondary-text-color);
+      --mdc-icon-size: 20px;
+    }
+
+    .searchBox {
+      flex-grow: 1;
     }
 
     .addRow,
