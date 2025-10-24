@@ -143,9 +143,6 @@ class PanelTodo extends LitElement {
     if (changedProperties.has("_entityId") || !this.hasUpdated) {
       this._setupTodoElement();
 
-      // if (this._entityId === "todo.shopping_list") {
-      //   this._fetchRecommendations("milk");
-      // }
       this.hass.connection.subscribeEvents((ev: any) => {
         const item = ev.data?.item?.name;
         if (item && this._entityId === "todo.shopping_list") {
