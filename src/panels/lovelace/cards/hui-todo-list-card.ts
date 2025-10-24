@@ -212,63 +212,84 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   );
 
   private async _exportViaService(filetype: "json" | "csv" | "pdf") {
-    const entityId = this._entityId!;
-    // If the entity is a todo.* entity, call todo/export; otherwise fall back to shopping_list/export
-    const isTodo = entityId?.startsWith("todo.");
-    const route = isTodo ? "todo" : "shopping_list";
+    if (!this._items) return;
 
-    const body: any = { filetype };
-    if (isTodo) {
-      // entity service requires a target
-      body.entity_id = entityId;
-    }
-
-    const res = await this.hass!.callApi<any>(
-      "POST",
-      `services/${route}/export?return_response=true`,
-      body
+    // Get the currently displayed items in their sorted order
+    const filteredItems = this._filterItemsBySearch(this._items);
+    const uncheckedItems = this._getUncheckedItems(
+      filteredItems,
+      this._config?.display_order
+    );
+    const itemsWithoutStatus = this._getItemsWithoutStatus(
+      filteredItems,
+      this._config?.display_order
+    );
+    const checkedItems = this._getCheckedItems(
+      filteredItems,
+      this._config?.display_order
     );
 
-    // Unwrap service_response: entity service returns a dict keyed by entity_id
-    let sr: any | undefined = res?.service_response;
-    if (!sr) return;
+    // Combine in display order: unchecked, no status, then checked
+    const sortedItems = [
+      ...uncheckedItems,
+      ...itemsWithoutStatus,
+      ...checkedItems,
+    ];
 
-    if (!("content" in sr)) {
-      // entity-scoped: pick the response for our entityId, or fallback if only one key
-      sr =
-        sr[entityId] ??
-        (Object.keys(sr).length === 1 ? sr[Object.keys(sr)[0]] : undefined);
-    }
-    if (!sr || sr.content == null) return;
-
-    const { filename, mime_type, encoding } = sr;
+    const entityId = this._entityId!;
+    const entityName =
+      this.hass!.states[entityId]?.attributes?.friendly_name || entityId;
+    const timestamp = new Date().toISOString().split("T")[0];
+    const filename = `${entityName}_${timestamp}.${filetype}`;
 
     let blob: Blob;
-    if (encoding && String(encoding).toLowerCase() === "base64") {
-      // Binary (PDF)
+
+    if (filetype === "json") {
+      const content = JSON.stringify(sortedItems, null, 2);
+      blob = new Blob([content], { type: "application/json" });
+    } else if (filetype === "csv") {
+      // CSV format: status,summary,description,due
+      let csv = "status,summary,description,due\n";
+      sortedItems.forEach((item) => {
+        const status = item.status || "no_status";
+        const summary = `"${(item.summary || "").replace(/"/g, '""')}"`;
+        const description = `"${(item.description || "").replace(/"/g, '""')}"`;
+        const due = item.due || "";
+        csv += `${status},${summary},${description},${due}\n`;
+      });
+      blob = new Blob([csv], { type: "text/csv" });
+    } else {
+      // PDF: call backend service as it requires special handling
+      const isTodo = entityId?.startsWith("todo.");
+      const route = isTodo ? "todo" : "shopping_list";
+      const body: any = { filetype };
+      if (isTodo) {
+        body.entity_id = entityId;
+      }
+
+      const res = await this.hass!.callApi<any>(
+        "POST",
+        `services/${route}/export?return_response=true`,
+        body
+      );
+
+      let sr: any | undefined = res?.service_response;
+      if (!sr) return;
+
+      if (!("content" in sr)) {
+        sr =
+          sr[entityId] ??
+          (Object.keys(sr).length === 1 ? sr[Object.keys(sr)[0]] : undefined);
+      }
+      if (!sr || sr.content == null) return;
+
       const byteStr = atob(String(sr.content));
       const bytes = new Uint8Array(byteStr.length);
       for (let i = 0; i < byteStr.length; i++) bytes[i] = byteStr.charCodeAt(i);
-      blob = new Blob([bytes], { type: mime_type || "application/pdf" });
-    } else {
-      // Text (CSV/JSON). If content is an object/array, stringify it.
-      const isString = typeof sr.content === "string";
-      const text = isString
-        ? (sr.content as string)
-        : JSON.stringify(sr.content, null, 2);
-
-      const fallbackType =
-        mime_type ||
-        (filetype === "json"
-          ? "application/json"
-          : filetype === "csv"
-            ? "text/csv"
-            : "text/plain");
-
-      blob = new Blob([text], { type: fallbackType });
+      blob = new Blob([bytes], { type: "application/pdf" });
     }
 
-    this._downloadBlob(filename || `export.${filetype}`, blob);
+    this._downloadBlob(filename, blob);
   }
 
   private _downloadBlob(filename: string, blob: Blob) {
@@ -951,11 +972,22 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     this.requestUpdate("_config", oldConfig);
   }
 
-  private _sortByCategory() {
-    if (!this._items) return;
+  private async _sortByCategory() {
+    if (!this._items || !this.hass || !this._entityId) return;
 
-    // Sort items by description field (case-insensitive)
-    const sortedItems = [...this._items].sort((a, b) =>
+    // Clear any display_order so items show in backend order
+    this._setSort(TodoSortMode.NONE);
+
+    // Separate items by status
+    const uncheckedItems = this._items.filter(
+      (item) => item.status === TodoItemStatus.NeedsAction
+    );
+    const otherItems = this._items.filter(
+      (item) => item.status !== TodoItemStatus.NeedsAction
+    );
+
+    // Sort unchecked items by description field (case-insensitive)
+    const sortedUnchecked = [...uncheckedItems].sort((a, b) =>
       caseInsensitiveStringCompare(
         a.description || "",
         b.description || "",
@@ -963,7 +995,20 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       )
     );
 
-    this._items = sortedItems;
+    // Optimistic update: immediately update the display order
+    this._items = [...sortedUnchecked, ...otherItems];
+    this.requestUpdate("_items");
+
+    // Update backend order by moving each item to its correct position
+    // Start from beginning so each item is placed after the previous one
+
+    for (let i = 0; i < sortedUnchecked.length; i++) {
+      const item = sortedUnchecked[i];
+      const prevItem = i > 0 ? sortedUnchecked[i - 1] : undefined;
+
+      // eslint-disable-next-line no-await-in-loop
+      await moveItem(this.hass, this._entityId, item.uid, prevItem?.uid);
+    }
   }
 
   private async _itemMoved(ev: CustomEvent) {
