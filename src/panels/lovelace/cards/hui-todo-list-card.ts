@@ -6,7 +6,6 @@ import {
   mdiDeleteSweep,
   mdiDotsVertical,
   mdiDrag,
-  mdiMagnify,
   mdiPlus,
   mdiSort,
   mdiFileExportOutline,
@@ -262,8 +261,8 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         (filetype === "json"
           ? "application/json"
           : filetype === "csv"
-            ? "text/csv"
-            : "text/plain");
+          ? "text/csv"
+          : "text/plain");
 
       blob = new Blob([text], { type: fallbackType });
     }
@@ -294,8 +293,8 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         this._exportViaService("pdf");
         break;
     }
+  }
 
-    
   private _filterItemsBySearch(items: TodoItem[]): TodoItem[] {
     if (!this._searchQuery.trim()) {
       return items;
@@ -358,27 +357,23 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
 
     const unavailable = isUnavailableState(stateObj.state);
 
-    const filteredItems = this._items
-      ? this._filterItemsBySearch(this._items)
-      : undefined;
-
     const checkedItems = this._getCheckedItems(
-      filteredItems,
+      this._items,
       this._config.display_order
     );
     const uncheckedItems = this._getUncheckedItems(
-      filteredItems,
+      this._items,
       this._config.display_order
     );
 
     const itemsWithoutStatus = this._getItemsWithoutStatus(
-      filteredItems,
+      this._items,
       this._config.display_order
     );
 
     const reorderableItems = this._reordering
       ? this._getUncheckedAndItemsWithoutStatus(
-          filteredItems,
+          this._items,
           this._config.display_order
         )
       : undefined;
@@ -412,25 +407,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
                   @click=${this._addItem}
                 >
                 </ha-icon-button>
-              </div>
-            `
-          : nothing}
-        ${this._items && this._items.length > 0
-          ? html`
-              <div class="searchRow">
-                <ha-svg-icon
-                  class="searchIcon"
-                  .path=${mdiMagnify}
-                ></ha-svg-icon>
-                <ha-textfield
-                  class="searchBox"
-                  .placeholder=${this.hass!.localize(
-                    "ui.panel.lovelace.cards.todo-list.search_items"
-                  )}
-                  .value=${this._searchQuery}
-                  @input=${this._handleSearchInput}
-                  .disabled=${unavailable}
-                ></ha-textfield>
               </div>
             `
           : nothing}
@@ -545,42 +521,67 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
   }
 
   private _renderMenu(config: TodoListCardConfig, unavailable: boolean) {
-    if (
-      (!config.display_order || config.display_order === TodoSortMode.NONE) &&
-      this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
-    ) {
-      return html`
-        <ha-button-menu
-          @closed=${stopPropagation}
-          fixed
-          @action=${this._handlePrimaryMenuAction}
-        >
-          <ha-icon-button
-            slot="trigger"
-            .path=${mdiDotsVertical}
-          ></ha-icon-button>
-          <ha-list-item graphic="icon">
-            ${this.hass!.localize(
-              this._reordering
-                ? "ui.panel.lovelace.cards.todo-list.exit_reorder_items"
-                : "ui.panel.lovelace.cards.todo-list.reorder_items"
-            )}
-            <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
-          </ha-list-item>
+    return this._todoListSupportsFeature(TodoListEntityFeature.MOVE_TODO_ITEM)
+      ? html`
+          <ha-button-menu
+            @closed=${stopPropagation}
+            fixed
+            @action=${this._handlePrimaryMenuAction}
+          >
+            <ha-icon-button
+              slot="trigger"
+              .path=${mdiDotsVertical}
+            ></ha-icon-button>
 
-          <!-- 👇 New Menu Option -->
-          <ha-list-item graphic="icon">
-            Sort by category
-            <ha-svg-icon
-              slot="graphic"
-              .path=${mdiSortAlphabeticalAscending}
-              .disabled=${unavailable}
-            ></ha-svg-icon>
-          </ha-list-item>
-        </ha-button-menu>
-      `;
-    }
-    return nothing;
+            <!-- Reorder item: visually disabled while a sort is active -->
+            <ha-list-item graphic="icon">
+              ${this.hass!.localize(
+                this._reordering
+                  ? "ui.panel.lovelace.cards.todo-list.exit_reorder_items"
+                  : "ui.panel.lovelace.cards.todo-list.reorder_items"
+              )}
+              <ha-svg-icon
+                slot="graphic"
+                .path=${mdiSort}
+                .disabled=${unavailable}
+              ></ha-svg-icon>
+            </ha-list-item>
+
+            <ha-list-item
+              graphic="icon"
+              ?activated=${config.display_order === TodoSortMode.ALPHA_ASC}
+            >
+              Sort A → Z
+              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+            </ha-list-item>
+
+            <ha-list-item
+              graphic="icon"
+              ?activated=${config.display_order === TodoSortMode.ALPHA_DESC}
+            >
+              Sort Z → A
+              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+            </ha-list-item>
+
+            <ha-list-item graphic="icon">
+              Sort by category
+              <ha-svg-icon
+                slot="graphic"
+                .path=${mdiSortAlphabeticalAscending}
+                .disabled=${unavailable}
+              ></ha-svg-icon>
+            </ha-list-item>
+
+            <ha-list-item
+              graphic="icon"
+              ?activated=${config.display_order === TodoSortMode.DUEDATE_ASC}
+            >
+              Sort by date
+              <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
+            </ha-list-item>
+          </ha-button-menu>
+        `
+      : nothing;
   }
 
   private _renderExport() {
@@ -878,23 +879,46 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
     }
   }
 
-  private _handleSearchInput(ev): void {
-    this._searchQuery = ev.target.value;
-  }
-
-  private _handlePrimaryMenuAction(ev: CustomEvent<ActionDetail>) {
+  private async _handlePrimaryMenuAction(ev: CustomEvent<ActionDetail>) {
     switch (ev.detail.index) {
       case 0:
+        // Reorder: if a sort is active, clear it first, then toggle reorder.
+        if (
+          this._config &&
+          this._config.display_order &&
+          this._config.display_order !== TodoSortMode.NONE
+        ) {
+          this._setSort(TodoSortMode.NONE);
+          // wait a tick for re-render to settle so order UI updates correctly
+          await this.updateComplete;
+        }
         this._toggleReorder();
         break;
       case 1:
+        this._setSort(TodoSortMode.ALPHA_ASC);
+        break;
+      case 2:
+        this._setSort(TodoSortMode.ALPHA_DESC);
+        break;
+      case 3:
+        // Sort by category (kept as original dev behavior: call service)
         this._sortByCategory();
+        break;
+      case 4:
+        // One-way date sort
+        this._setSort(TodoSortMode.DUEDATE_ASC);
         break;
     }
   }
 
   private _toggleReorder() {
     this._reordering = !this._reordering;
+  }
+
+  private _setSort(mode: TodoSortMode) {
+    const oldConfig = this._config;
+    this._config = { ...this._config!, display_order: mode };
+    this.requestUpdate("_config", oldConfig);
   }
 
   private async _sortByCategory() {
@@ -908,7 +932,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       window.alert(`Failed to sort by category: ${err?.message || err}`);
     }
   }
-
 
   private async _itemMoved(ev: CustomEvent) {
     ev.stopPropagation();
@@ -987,24 +1010,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       right: 16px;
       inset-inline-start: initial;
       inset-inline-end: 16px;
-    }
-
-    .searchRow {
-      padding: 8px 16px;
-      padding-bottom: 8px;
-      display: flex;
-      flex-direction: row;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .searchIcon {
-      color: var(--secondary-text-color);
-      --mdc-icon-size: 20px;
-    }
-
-    .searchBox {
-      flex-grow: 1;
     }
 
     .addRow,
