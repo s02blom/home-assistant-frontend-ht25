@@ -588,6 +588,15 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
               <ha-svg-icon slot="graphic" .path=${mdiSort}></ha-svg-icon>
             </ha-list-item>
 
+            <ha-list-item graphic="icon">
+              Sort by category
+              <ha-svg-icon
+                slot="graphic"
+                .path=${mdiSortAlphabeticalAscending}
+                .disabled=${unavailable}
+              ></ha-svg-icon>
+            </ha-list-item>
+
             <ha-list-item
               graphic="icon"
               ?activated=${config.display_order === TodoSortMode.DUEDATE_ASC}
@@ -931,11 +940,12 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
         this._setSort(TodoSortMode.ALPHA_DESC);
         break;
       case 3:
-        // One-way date sort
-        this._setSort(TodoSortMode.DUEDATE_ASC);
+        // Sort by category (kept as original dev behavior: call service)
+        this._sortByCategory();
         break;
       case 4:
-        this._sortByCategory();
+        // One-way date sort
+        this._setSort(TodoSortMode.DUEDATE_ASC);
         break;
     }
   }
@@ -961,7 +971,6 @@ export class HuiTodoListCard extends LitElement implements LovelaceCard {
       window.alert(`Failed to sort by category: ${err?.message || err}`);
     }
   }
-
 
   private async _itemMoved(ev: CustomEvent) {
     ev.stopPropagation();
